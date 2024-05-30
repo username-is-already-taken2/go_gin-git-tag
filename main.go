@@ -1,7 +1,9 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,9 +44,32 @@ func getVersionInfoHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, versionInfo)
 }
 
-func main() {
-	r := gin.Default()
+// getEnv get key environment variable if exist, otherwise return defaultValue
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if len(value) == 0 {
+		return defaultValue
+	}
+	return value
+}
 
+func SetupRouter() *gin.Engine {
+	if Version == "development" {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	// Creates a router without any middleware by default
+	// r := gin.Default()
+	r := gin.New()
+	// Global middleware
+	// Logger middleware will write the logs to gin.DefaultWriter even if you set with GIN_MODE=release.
+	// By default gin.DefaultWriter = os.Stdout
+	r.Use(gin.Logger())
+	// Recovery middleware recovers from any panics and writes a 500 if there was one.
+	r.Use(gin.Recovery())
+	r.ForwardedByClientIP = true
+	r.SetTrustedProxies([]string{})
 	// Simple Default Page
 	r.GET("/", func(c *gin.Context) {
 		c.String(http.StatusOK, "Hello, Gin!")
@@ -56,13 +81,11 @@ func main() {
 			"timestamp": time.Now().Format(time.RFC3339),
 		})
 	})
-
 	// Route to default versionInfo
 	r.GET("/version", func(c *gin.Context) {
 		c.Request.URL.Path = "/version/handler"
 		r.HandleContext(c)
 	})
-
 	// Route to get version info from middleware
 	r.GET("/version/middleware", versionMiddleware(), func(c *gin.Context) {
 		versionInfo, exists := c.Get("versionInfo")
@@ -72,10 +95,24 @@ func main() {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Version info not found"})
 		}
 	})
-
 	// Route to get versionInfo from a handler
 	r.GET("/version/handler", getVersionInfoHandler)
 
+	return r
+}
+
+func main() {
+
+	// Print Server information to console
+	slog.Info("Application", "Version", Version)
+	slog.Info("Application", "BuildTime", BuildTime)
+	ginPort := getEnv("PORT", "8080")
+	slog.Info("Starting GIN on", "PORT", ginPort)
+
 	// Start gin server
-	r.Run()
+	err := SetupRouter().Run(":" + ginPort)
+	if err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
 }
